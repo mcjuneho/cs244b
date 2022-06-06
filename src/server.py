@@ -22,8 +22,15 @@ class KVStorage(SyncObj):
         self.__data = {}
 
     @replicated
-    def set(self, key, value):
-        self.__data[key] = value
+    def set(self, key, size, fragment_idx, fragment_data):
+        if key not in self.__data:
+            self.__data[key] = Assembler(size)
+        else:
+            self.__data[key].add_fragment(fragment_idx, fragment_data)
+            # old_assembler = self.__data[key]
+            # self.__data[key] = self.merge_assemblers(old_assembler, value) #only merge completed fragments
+
+        return self.__data[key].get_needed()
 
     # @replicated
     # def add_fragment(self, key, index, value):
@@ -40,6 +47,20 @@ class KVStorage(SyncObj):
     
     def get_data(self):
         return self.__data
+    
+    def merge_assemblers(self, assem1, assem2):
+        assert(assem1.get_size() == assem2.get_size())
+        size = assem1.get_size()
+        for i in range(assem1.get_num_fragments()):
+            if (len(assem1.get_fragments()[i]) == 0 and len(assem2.get_fragments()[i]) != 0):
+                fragment_start = i * FRAGMENT_SIZE
+                fragment_end = (i+1) * FRAGMENT_SIZE
+                if (fragment_end + FRAGMENT_SIZE > size):
+                    fragment_end = size
+                assem2.get_data()[fragment_start:fragment_end] = assem1.get_data()[fragment_start:fragment_end]
+
+
+
 
 _g_kvstorage = None
 assembler_storage = {}
@@ -66,23 +87,41 @@ class Assembler():
         print("finished initializing Assembler")
 
 
+    def add_fragment(self,fragment_idx, fragment_data):
+        fragment_start = fragment_idx * FRAGMENT_SIZE
+        fragment_end = (fragment_idx+1) * FRAGMENT_SIZE
+        if (fragment_end + FRAGMENT_SIZE > self.__size):
+            fragment_end = self.__size
+        self.__data[fragment_start:fragment_end] = fragment_data
+        self.__needed[fragment_idx] = set()
+
     def recieve(self, index, packet):
         fragment_idx = index // FRAGMENT_SIZE
         print("index received, ", index)
+        fragment_data = None
+
         if index in self.__needed[fragment_idx]:
             print("needed index")
             self.__data[index] = packet
             self.__needed[fragment_idx].remove(index)
-            
+            is_fragment_clear = self.check_fragment_clear(fragment_idx)
+            if (is_fragment_clear):
+                fragment_start = fragment_idx * FRAGMENT_SIZE
+                fragment_end = (fragment_idx+1) * FRAGMENT_SIZE
+                if (fragment_end + FRAGMENT_SIZE > self.__size):
+                    fragment_end = self.__size
+                fragment_data = self.__data[fragment_start:fragment_end]
+
+
+
         print("needed packets left in frag idx ", fragment_idx, " and num_left = ", len(self.__needed[fragment_idx]))
         print("left in needed packet = ", self.__needed[fragment_idx])
-        return self.check_fragment_clear(fragment_idx)
+        return fragment_idx, fragment_data
 
         #return self.__needed
         # return self.get_needed()
     
     def check_fragment_clear(self, fragment_index):
-        print("checked fragment is clear?")
         return len(self.__needed[fragment_index]) == 0
 
         # return self.get_needed()
@@ -97,8 +136,23 @@ class Assembler():
         return True
 
     def get_needed(self):
-        #return self.__needed
-        return set().union(*self.__needed)
+        return self.__needed
+        # return set().union(*self.__needed)
+
+    def get_size(self):
+        return self.__size
+
+    def get_num_fragments(self):
+        return self.__fragments
+
+    def get_fragments(self):
+        return self.__needed
+
+    def get_data(self):
+        return self.__data
+
+    def set_needed(self, needed):
+        self.__needed = needed
 
     def reassemble(self):
         return b''.join(filter(None, self.__data))
@@ -180,11 +234,14 @@ class KVRequestHandler(BaseHTTPRequestHandler):
             print("key is in data, ", key in _g_kvstorage.get_data())
 
             if key not in assembler_storage and key not in _g_kvstorage.get_data().keys():
-                print("got to start of assembler")
-                image_assembler = Assembler(size)
-                print("made image assembler")
-                assembler_storage[key] = image_assembler
-                print("added assembler to storage")
+                _g_kvstorage.set(key, size, None, None)
+
+
+                # print("got to start of assembler")
+                # image_assembler = Assembler(size)
+                # print("made image assembler")
+                assembler_storage[key] = _g_kvstorage.get(key)
+                # print("added assembler to storage")
 
             elif key not in assembler_storage and key in _g_kvstorage.get_data().keys():
                 print("EXTRACTED ASSEMBLER FROM KVSTORAGE")
@@ -193,15 +250,20 @@ class KVRequestHandler(BaseHTTPRequestHandler):
 
             elif index != -1:
                 print("got to start of non-start assembler")
-                is_fragment_clear = assembler_storage[key].recieve(index, value)
-                print("is_fragment_clear, ", is_fragment_clear)
+                fragment_idx, fragment = assembler_storage[key].recieve(index, value)
+
                 print("added data to assembler")
-                if is_fragment_clear:
+                # check one fragment clear
+                if fragment is not None:
                     print("adding completed fragment packet to kvs")
-                    _g_kvstorage.set(key, assembler_storage[key])
-                needed = assembler_storage[key].get_needed()
+                    needed = _g_kvstorage.set(key, size, fragment_idx, fragment)
+                    for i in range(len(needed)): # we loop through fragment
+                        if (len(needed[i]) == 0):
+                            assembler_storage[key].get_needed()[i] = set()
+                
+                needed = set().union(*needed)
                 no_fragments_left = assembler_storage[key].finished()
-                print("no_fragments_left, " ,no_fragments_left)
+                print("no_fragments_left, ", no_fragments_left)
                 if no_fragments_left:
                     # print("succesfully added complete assembler to kvs")
                     assembler_storage.pop(key)

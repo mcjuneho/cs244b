@@ -46,7 +46,7 @@ def main():
     client3 = Client('client3', servers_ports)
 
     client1.connect(0)
-    client2.connect(1)
+    # client2.connect(1)
     client3.connect(2)
 
     #start streaming and retrieving data
@@ -75,17 +75,17 @@ def main():
 
     packets_left1 = eval(client1.start_stream('test' + str(partitions), num_packets))
 
-    packets_to_send1 = set([i for i in range(num_packets//2)])
+    packets_to_send1 = set([i for i in range(num_packets)])
     packets_to_send2 = set([i for i in range(num_packets//2, num_packets)])
 
     for i in packets_to_send1:
         client1.stream_data('test' + str(partitions), packets[i], num_packets, i)
     
     time.sleep(2)
-    packets_left2 = eval(client2.start_stream('test' + str(partitions), num_packets))
+    # packets_left2 = eval(client2.start_stream('test' + str(partitions), num_packets))
 
-    for i in packets_to_send2:
-        client2.stream_data('test' + str(partitions), packets[i], num_packets, i)
+    # for i in packets_to_send2:
+    #     client2.stream_data('test' + str(partitions), packets[i], num_packets, i)
 
     
 
