@@ -39,25 +39,27 @@ class Client():
 def main():
     partition_chance = float(sys.argv[1])
     print("partition chance: " + str(partition_chance))
-    servers_ports = ['9200', '9300']
+    servers_ports = ['9200', '9300', '9100']
 
     client1 = Client('client1', servers_ports)
     client2 = Client('client2', servers_ports)
+    client3 = Client('client3', servers_ports)
 
     client1.connect(0)
     client2.connect(1)
+    client3.connect(2)
 
     #start streaming and retrieving data
-    img = iio.imread('../photos/stanford_big.jpeg')
+    img = iio.imread('../photos/stanford.jpeg')
     jpg_encoded = iio.imwrite("<bytes>", img, extension=".jpeg")
     print(len(jpg_encoded))
 
     size = len(jpg_encoded)
     packets = []
-    num_packets = size // 1000
-    print(num_packets)
+    #num_packets = size // 1000
+    #print(num_packets)
     #return
-    #num_packets = 300
+    num_packets = 300
 
     for i in range(num_packets-1):
         #print(size//num_packets * i)
@@ -71,9 +73,24 @@ def main():
 
     start = time.time()
 
-    packets_left = eval(client1.start_stream('test' + str(partitions), num_packets))
+    packets_left1 = eval(client1.start_stream('test' + str(partitions), num_packets))
 
-    while len(packets_left) != 0:
+    packets_to_send1 = set([i for i in range(num_packets//2)])
+    packets_to_send2 = set([i for i in range(num_packets//2, num_packets)])
+
+    for i in packets_to_send1:
+        client1.stream_data('test' + str(partitions), packets[i], num_packets, i)
+    
+    time.sleep(2)
+    packets_left2 = eval(client2.start_stream('test' + str(partitions), num_packets))
+
+    for i in packets_to_send2:
+        client2.stream_data('test' + str(partitions), packets[i], num_packets, i)
+
+    
+
+    #while len(packets_left) != 0:
+    while False:
         print("round " + str(round))
         print("packets left: " + str(packets_left))
         if random.random() < partition_chance:
@@ -96,12 +113,12 @@ def main():
 
     print(end-start)
     
-    #time.sleep(3)
+    time.sleep(3)
 
-    #jpg_recieved = client2.get_data('test' + str(partitions))
-    #img_received = iio.imread(jpg_recieved)
-    #imgplot = plt.imshow(img_received)
-    #plt.show()
+    jpg_recieved = client3.get_data('test' + str(partitions))
+    img_received = iio.imread(jpg_recieved)
+    imgplot = plt.imshow(img_received)
+    plt.show()
 
     #print(client2.get_data('test'))
 
